@@ -1,0 +1,5 @@
+method,n_total,n_significant
+Raw,120,101
+Bonferroni,120,76
+Holm-Bonferroni,120,81
+Benjamini-Hochberg (BH),120,100

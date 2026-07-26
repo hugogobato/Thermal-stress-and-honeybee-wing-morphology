@@ -1,0 +1,56 @@
+cff-version: 1.2.0
+message: "If you use this software or data, please cite the paper below."
+title: "Thermal stress and honeybee wing morphology: analysis code and data"
+abstract: >-
+  Data and complete R and Python analysis pipelines for a common-garden study of
+  Apis mellifera wing morphometry in sister broods reared at two developmental
+  temperatures (Coyhaique, Chile and Ribeirao Preto, Brazil).
+type: software
+license: MIT
+repository-code: "https://github.com/hugogobato/Thermal-stress-and-honeybee-wing-morphology"
+authors:
+  - family-names: Gruber
+    given-names: Caroline Vivian
+    affiliation: "Departamento de Genetica e Evolucao, Universidade Federal de Sao Carlos, Brazil"
+  - family-names: Polido
+    given-names: Mariah
+    orcid: "https://orcid.org/0000-0001-9965-5127"
+    affiliation: "Departamento de Genetica e Evolucao, Universidade Federal de Sao Carlos, Brazil"
+  - family-names: Souto
+    given-names: Hugo Gobato
+    orcid: "https://orcid.org/0000-0002-7039-0572"
+    affiliation: "Dell, Austin, TX, USA"
+    email: hugogobatosouto@gmail.com
+  - family-names: Soares
+    given-names: Ademilson Espencer E.
+    affiliation: "Departamento de Genetica, Faculdade de Medicina de Ribeirao Preto, Universidade de Sao Paulo, Brazil"
+  - family-names: Araneda Duran
+    given-names: Ximena
+    orcid: "https://orcid.org/0000-0002-7876-6909"
+  - family-names: Del Lama
+    given-names: Marco Antonio
+    orcid: "https://orcid.org/0000-0002-3329-8953"
+    affiliation: "Departamento de Genetica e Evolucao, Universidade Federal de Sao Carlos, Brazil"
+preferred-citation:
+  type: article
+  title: >-
+    Phenotypic plasticity, canalization, and developmental stability of the
+    Apis mellifera wing: effects of developmental temperature on sister broods
+  year: 2026
+  authors:
+    - family-names: Gruber
+      given-names: Caroline Vivian
+    - family-names: Polido
+      given-names: Mariah
+      orcid: "https://orcid.org/0000-0001-9965-5127"
+    - family-names: Souto
+      given-names: Hugo Gobato
+      orcid: "https://orcid.org/0000-0002-7039-0572"
+    - family-names: Soares
+      given-names: Ademilson Espencer E.
+    - family-names: Araneda Duran
+      given-names: Ximena
+      orcid: "https://orcid.org/0000-0002-7876-6909"
+    - family-names: Del Lama
+      given-names: Marco Antonio
+      orcid: "https://orcid.org/0000-0002-3329-8953"

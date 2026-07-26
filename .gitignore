@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+.DS_Store
+.venv/
+venv/
+env/

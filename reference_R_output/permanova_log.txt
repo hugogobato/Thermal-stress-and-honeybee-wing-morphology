@@ -1,0 +1,16 @@
+n = 4100 rows
+=== 2-way PERMANOVA (euclidean distance, 999 permutations) ===
+Permutation test for adonis under reduced model
+Terms added sequentially (first to last)
+Permutation: free
+Number of permutations: 999
+
+vegan::adonis2(formula = Y_perm ~ origin * side, data = df_complete, permutations = 999, method = "euclidean", by = "terms")
+              Df SumOfSqs      R2       F Pr(>F)    
+origin         1    3.640 0.07281 340.992  0.001 ***
+side           1    1.904 0.03809 178.371  0.001 ***
+origin:side    1    0.722 0.01444  67.632  0.001 ***
+Residual    4096   43.720 0.87465                   
+Total       4099   49.985 1.00000                   
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1

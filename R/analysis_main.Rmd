@@ -1,0 +1,1383 @@
+---
+title: "Apis mellifera Wing Morphometry Analysis — Coyhaique vs Ribeirão Preto"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  fig.align = "center"
+)
+```
+
+---
+
+## 0. Setup
+
+```{r packages}
+# ── Install missing packages ──────────────────────────────────────────────────
+pkgs_needed <- c(
+  "ggplot2", "dplyr", "tidyr", "readr", "stringr", "purrr", "tibble", "forcats",
+  "patchwork", "RColorBrewer",
+  "car", "vegan", "MASS", "lme4", "rrcov",
+  "pheatmap", "ggrepel"
+)
+new_pkgs <- setdiff(pkgs_needed, rownames(installed.packages()))
+if (length(new_pkgs)) {
+  install.packages(new_pkgs, repos = "https://cloud.r-project.org")
+}
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(dplyr)
+  library(tidyr)
+  library(readr)
+  library(stringr)
+  library(purrr)
+  library(tibble)
+  library(forcats)
+  library(patchwork)
+  library(RColorBrewer)
+  library(car)      # Anova() Type II
+  library(vegan)    # adonis2 (PERMANOVA)
+  library(MASS)     # lda()
+  library(lme4)     # lmer()
+  library(rrcov)    # CovMcd() (Robust PCA)
+  library(pheatmap) # heatmap with dendrograms
+  library(ggrepel)  # geom_text_repel()
+})
+```
+
+```{r globals}
+# ── Global ggplot2 theme  (matches seaborn whitegrid, context=notebook) ───────
+theme_set(
+  theme_bw(base_size = 12) +
+    theme(
+      panel.grid.minor  = element_blank(),
+      plot.title        = element_text(face = "bold", size = 13),
+      axis.title        = element_text(face = "bold", size = 11),
+      strip.text        = element_text(face = "bold"),
+      legend.background = element_rect(colour = "gray80"),
+      legend.key.size   = unit(0.8, "lines")
+    )
+)
+
+# ── Colour / shape constants ──────────────────────────────────────────────────
+ORIGIN_PAL    <- c("Chile" = "#2166AC", "Ribeirao_Preto" = "#B2182B")
+ORIGIN_LABELS <- c("Chile" = "Coyhaique",   "Ribeirao_Preto" = "Ribeirão Preto")
+SIDE_PAL      <- c("right" = "#1B7837", "left" = "#762A83")
+PAIR_PAL      <- brewer.pal(12, "Set3")
+VEIN_COLS     <- c("nerv01", "nerv02", "nerv03", "nerv04", "nerv05")
+VEIN_LABELS   <- c(nerv01 = "M1", nerv02 = "M2", nerv03 = "M3",
+                   nerv04 = "M4", nerv05 = "M5")
+
+# ── Population-SD scaler  (matches sklearn StandardScaler exactly) ────────────
+# R's scale() uses sample SD (n-1); sklearn uses population SD (n).
+scale_pop <- function(x) {
+  x   <- as.matrix(x)
+  mu  <- colMeans(x)
+  sdp <- sqrt(colMeans(sweep(x, 2, mu, "-")^2))
+  sweep(sweep(x, 2, mu, "-"), 2, sdp, "/")
+}
+
+# ── Resolve MASS::select masking dplyr::select ────────────────────────────────
+select <- dplyr::select
+
+# ── Output directories ────────────────────────────────────────────────────────
+dir.create("pca_plots",    showWarnings = FALSE)
+dir.create("traits_plots", showWarnings = FALSE)
+```
+
+---
+
+## 1. Load and prepare data
+
+```{r load-data}
+df    <- read_csv("../data/data_clean.csv",           show_col_types = FALSE)
+df_bp <- read_csv("../data/data_boxplot_media_long.csv", show_col_types = FALSE)
+
+# Factor ordering and zero-padded pair_id  (matches Python pd.Categorical + str.zfill(2))
+df <- df %>%
+  mutate(
+    origin  = factor(origin,  levels = c("Chile", "Ribeirao_Preto")),
+    side    = factor(side,    levels = c("right", "left")),
+    pair_id = str_pad(as.character(pair_id), width = 2, pad = "0")
+  )
+
+# Complete cases across all 5 vein columns  (matches df.dropna(subset=VEIN_COLS))
+df_complete <- df %>% drop_na(all_of(VEIN_COLS))
+
+cat("Shape of df:          ", nrow(df), "×", ncol(df), "\n")
+cat("Shape of df_complete: ", nrow(df_complete), "×", ncol(df_complete), "\n")
+cat("\nNAs per vein column:\n")
+print(colSums(is.na(df[VEIN_COLS])))
+cat("\nGroup sizes (origin × side):\n")
+print(count(df_complete, origin, side))
+```
+
+```{r preview-data}
+head(df_complete, 10)
+```
+
+---
+
+## 2. Boxplots
+
+### 2a. Colony-pair mean vein length — Right wing
+
+```{r boxplot-media, fig.width=14, fig.height=6}
+# Re-derive origin and colony_num from colony_code  (matches Cell 5)
+df_bp2 <- df_bp %>%
+  mutate(
+    origin     = case_when(
+      str_sub(colony_code, 1, 2) == "CH" ~ "Coyhaique",
+      str_sub(colony_code, 1, 2) == "RP" ~ "Ribeirão Preto",
+      TRUE ~ NA_character_
+    ),
+    colony_num = str_sub(colony_code, 3)
+  )
+
+p_media <- ggplot(df_bp2, aes(x = colony_num, y = mean_nerv, fill = origin)) +
+  geom_boxplot(
+    width        = 0.65,
+    linewidth    = 0.8,
+    outlier.size  = 0.8,
+    outlier.alpha = 0.4
+  ) +
+  scale_fill_manual(
+    values = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B"),
+    name   = "Origin"
+  ) +
+  labs(
+    x     = "Colony Pair",
+    y     = "Mean Vein Length (nerv01–05, mm)",
+    title = "Wing Vein Measurements by Colony Pair and Origin (Right Wing)"
+  ) +
+  theme(panel.grid.major.x = element_blank())
+
+print(p_media)
+ggsave("plot_boxplot_media.jpg", p_media,
+       width = 14, height = 6, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_boxplot_media.jpg\n")
+```
+
+### 2b. Faceted per-trait boxplots — Right wing
+
+```{r boxplot-traits, fig.width=18, fig.height=8}
+df_right <- df_complete %>% filter(side == "right")
+
+df_right_long <- df_right %>%
+  pivot_longer(all_of(VEIN_COLS), names_to = "trait", values_to = "value") %>%
+  mutate(origin_label = ORIGIN_LABELS[as.character(origin)],
+         trait        = VEIN_LABELS[trait])
+
+p_traits <- ggplot(df_right_long,
+                   aes(x = pair_id, y = value, fill = origin_label)) +
+  geom_boxplot(
+    width        = 0.6,
+    linewidth    = 0.7,
+    outlier.size  = 0.6,
+    outlier.alpha = 0.3
+  ) +
+  facet_wrap(~ trait, ncol = 3, scales = "free_y") +
+  scale_fill_manual(
+    values = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B"),
+    name   = "Origin"
+  ) +
+  labs(
+    x     = "Colony Pair",
+    y     = "Measurement (mm)",
+    title = "Vein Measurements by Colony Pair and Origin (Right Wing)"
+  )
+
+print(p_traits)
+ggsave("plot_boxplot_traits.jpg", p_traits,
+       width = 18, height = 8, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_boxplot_traits.jpg\n")
+```
+
+### 2c. Individual per-trait boxplots → `traits_plots/`
+
+```{r boxplot-per-trait, results='hide'}
+for (tr in VEIN_COLS) {
+  tr_label <- VEIN_LABELS[tr]
+  p_tr <- ggplot(
+    df_right_long %>% filter(trait == tr_label),
+    aes(x = pair_id, y = value, fill = origin_label)
+  ) +
+    geom_boxplot(
+      width        = 0.6,
+      linewidth    = 0.7,
+      outlier.size  = 0.6,
+      outlier.alpha = 0.3
+    ) +
+    scale_fill_manual(
+      values = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B"),
+      name   = "Origin"
+    ) +
+    labs(
+      x     = "Colony Pair",
+      y     = "Measurement (mm)",
+      title = tr_label
+    ) +
+    theme(legend.position = "right")
+
+  ggsave(
+    file.path("traits_plots", paste0("boxplot_", tr, ".jpg")),
+    p_tr, width = 7, height = 4, dpi = 300, device = "jpeg", bg = "white"
+  )
+}
+cat("Saved 5 per-trait plots to traits_plots/\n")
+```
+
+---
+
+## 3. Principal Component Analysis
+
+```{r pca-fit}
+X_mat    <- as.matrix(df_complete[VEIN_COLS])
+X_scaled <- scale_pop(X_mat)                        # population SD → matches sklearn
+
+pca_fit  <- prcomp(X_scaled, center = FALSE, scale. = FALSE)
+
+# Align PC signs to sklearn's svd_flip convention: for each PC, the element
+# with the largest absolute loading is forced positive (same as Python output).
+flip <- sign(pca_fit$rotation[
+  cbind(apply(abs(pca_fit$rotation), 2, which.max), seq_len(ncol(pca_fit$rotation)))
+])
+pca_fit$rotation <- sweep(pca_fit$rotation, 2, flip, "*")
+pca_fit$x        <- sweep(pca_fit$x,        2, flip, "*")
+
+# Variance explained (%)
+var_exp  <- pca_fit$sdev^2 / sum(pca_fit$sdev^2) * 100
+
+# Loadings matrix
+loadings_pca <- as.data.frame(pca_fit$rotation)
+
+cat("Variance explained per PC (%):\n")
+print(round(var_exp, 2))
+cat("\nPC loadings:\n")
+print(round(loadings_pca, 4))
+
+# Scores data frame
+pca_df <- as.data.frame(pca_fit$x) %>%
+  mutate(
+    origin       = df_complete$origin,
+    side         = df_complete$side,
+    pair_id      = df_complete$pair_id,
+    colony_label = df_complete$colony_label,
+    origin_label = ORIGIN_LABELS[as.character(origin)]
+  )
+```
+
+```{r pca-plot-functions}
+# ── Scree plot ─────────────────────────────────────────────────────────────────
+plot_scree <- function() {
+  scree_df <- data.frame(PC = 1:5, var = var_exp)
+  ggplot(scree_df, aes(x = PC, y = var)) +
+    geom_col(fill = "#4393C3", colour = "#2166AC", linewidth = 0.8, width = 0.7) +
+    geom_line(colour = "#2166AC", linewidth = 0.8) +
+    geom_point(colour = "#2166AC", size = 3) +
+    geom_text(aes(label = sprintf("%.1f%%", var)),
+              vjust = -0.6, fontface = "bold", size = 3.5) +
+    scale_x_continuous(breaks = 1:5) +
+    expand_limits(y = max(var_exp) * 1.12) +
+    labs(x = "Principal Component", y = "Variance Explained (%)",
+         title = "Scree Plot")
+}
+
+# ── PCA by origin ──────────────────────────────────────────────────────────────
+plot_pca_origin <- function() {
+  ggplot(pca_df, aes(x = PC1, y = PC2, colour = origin_label)) +
+    geom_point(alpha = 0.3, size = 1) +
+    stat_ellipse(type = "norm", level = 0.95,
+                 linetype = "dashed", linewidth = 1.5) +
+    scale_colour_manual(
+      values = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B"),
+      name   = "Origin"
+    ) +
+    labs(
+      x     = sprintf("PC1 (%.1f%%)", var_exp[1]),
+      y     = sprintf("PC2 (%.1f%%)", var_exp[2]),
+      title = "PCA — by Origin"
+    )
+}
+
+# ── PCA by wing side ───────────────────────────────────────────────────────────
+plot_pca_side <- function() {
+  ggplot(pca_df, aes(x = PC1, y = PC2, colour = side)) +
+    geom_point(alpha = 0.3, size = 1) +
+    stat_ellipse(type = "norm", level = 0.95,
+                 linetype = "dashed", linewidth = 1.5) +
+    scale_colour_manual(values = SIDE_PAL, name = "Side") +
+    labs(
+      x     = sprintf("PC1 (%.1f%%)", var_exp[1]),
+      y     = sprintf("PC2 (%.1f%%)", var_exp[2]),
+      title = "PCA — by Wing Side"
+    )
+}
+
+# ── PCA by colony pair ─────────────────────────────────────────────────────────
+plot_pca_pair <- function() {
+  pair_ids_sorted <- sort(unique(pca_df$pair_id))
+  pair_colors     <- setNames(PAIR_PAL[seq_along(pair_ids_sorted)], pair_ids_sorted)
+
+  ggplot(pca_df, aes(x = PC1, y = PC2,
+                     colour = pair_id,
+                     shape  = origin)) +
+    geom_point(alpha = 0.5, size = 1.5) +
+    scale_colour_manual(values = pair_colors, name = "Colony Pair") +
+    scale_shape_manual(
+      values = c("Chile" = 16, "Ribeirao_Preto" = 17),
+      labels = c("Chile" = "Coyhaique", "Ribeirao_Preto" = "RPR"),
+      name   = "Origin"
+    ) +
+    labs(
+      x     = sprintf("PC1 (%.1f%%)", var_exp[1]),
+      y     = sprintf("PC2 (%.1f%%)", var_exp[2]),
+      title = "PCA — by Colony Pair (● Coyhaique, ▲ RPR)"
+    ) +
+    guides(colour = guide_legend(override.aes = list(size = 3)))
+}
+```
+
+```{r pca-individual-panels, results='hide'}
+# Save each panel individually at 6×5 in, 300 dpi
+panel_names <- c("scree_plot", "pca_origin", "pca_side", "pca_colony_pair")
+panel_fns   <- list(plot_scree, plot_pca_origin, plot_pca_side, plot_pca_pair)
+
+for (i in seq_along(panel_names)) {
+  ggsave(
+    file.path("pca_plots", paste0(panel_names[i], ".jpg")),
+    panel_fns[[i]](),
+    width = 6, height = 5, dpi = 300, device = "jpeg", bg = "white"
+  )
+}
+cat("Saved 4 individual PCA panels to pca_plots/\n")
+```
+
+```{r pca-combined, fig.width=15, fig.height=12}
+p_pca_combined <- (
+  plot_scree()      + plot_pca_origin() +
+  plot_pca_side()   + plot_pca_pair()
+) +
+  plot_annotation(
+    title = "Principal Component Analysis — Wing Vein Measurements",
+    theme = theme(plot.title = element_text(size = 16, face = "bold"))
+  )
+
+print(p_pca_combined)
+ggsave("pca_plots/plot_pca_combined.jpg", p_pca_combined,
+       width = 15, height = 12, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: pca_plots/plot_pca_combined.jpg\n")
+```
+
+---
+
+## 4. MANOVA + Follow-up Univariate ANOVAs
+
+```{r manova}
+Y_manova <- as.matrix(df_complete[VEIN_COLS])
+
+# Type III SS requires orthogonal (sum-to-zero) contrasts; R's default
+# contr.treatment gives wrong Type III main-effect tests.  Set locally and
+# restore immediately after so the rest of the document is unaffected.
+# This matches statsmodels MANOVA.mv_test() which also uses Type III.
+# Note: statsmodels prints an "Intercept" row; car::Manova omits it (same
+# model — the intercept test against a zero grand-mean is uninformative here).
+old_contrasts <- options(contrasts = c("contr.sum", "contr.poly"))
+fit_manova    <- lm(Y_manova ~ origin * side, data = df_complete)
+
+cat("=== MANOVA (Type III) — Pillai ===\n")
+print(car::Manova(fit_manova, type = "III", test.statistic = "Pillai"))
+cat("\n=== MANOVA (Type III) — Wilks ===\n")
+print(car::Manova(fit_manova, type = "III", test.statistic = "Wilks"))
+cat("\n=== MANOVA (Type III) — Hotelling-Lawley ===\n")
+print(car::Manova(fit_manova, type = "III", test.statistic = "Hotelling-Lawley"))
+cat("\n=== MANOVA (Type III) — Roy ===\n")
+print(car::Manova(fit_manova, type = "III", test.statistic = "Roy"))
+
+options(old_contrasts)  # restore contr.treatment for the rest of the document
+```
+
+```{r anova-followup}
+# Follow-up Type II univariate ANOVAs (matches pingouin pg.anova with detailed=True)
+anova_results_list <- lapply(VEIN_COLS, function(trait) {
+  fmla    <- as.formula(paste(trait, "~ origin * side"))
+  fit_lm  <- lm(fmla, data = df_complete)
+  aov_t2  <- car::Anova(fit_lm, type = "II")
+  aov_df  <- as.data.frame(aov_t2)
+
+  ss_resid <- aov_df["Residuals", "Sum Sq"]
+  df_resid <- aov_df["Residuals", "Df"]
+
+  sources  <- rownames(aov_df)[rownames(aov_df) != "Residuals"]
+
+  do.call(rbind, lapply(sources, function(src) {
+    ss <- aov_df[src, "Sum Sq"]
+    df <- aov_df[src, "Df"]
+    data.frame(
+      trait     = trait,
+      Source    = src,
+      SS        = ss,
+      DF        = df,
+      MS        = ss / df,
+      F         = aov_df[src, "F value"],
+      `p-unc`   = aov_df[src, "Pr(>F)"],
+      np2       = ss / (ss + ss_resid),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  }))
+})
+
+anova_results <- do.call(rbind, anova_results_list)
+rownames(anova_results) <- NULL
+
+print(anova_results)
+write.csv(anova_results, "results_manova_followup.csv", row.names = FALSE)
+cat("Saved: results_manova_followup.csv\n")
+```
+
+---
+
+## 5. Multivariate Normality — Mardia's Test
+
+```{r mardia}
+# Manual implementation matching the Python notebook exactly
+X_vein     <- as.matrix(df_complete[VEIN_COLS])
+n_obs      <- nrow(X_vein)
+p_dim      <- ncol(X_vein)
+
+X_centered <- sweep(X_vein, 2, colMeans(X_vein), "-")
+S_cov      <- cov(X_vein)                    # uses n-1 (matches Python np.cov)
+S_inv      <- solve(S_cov)
+D_mat      <- X_centered %*% S_inv %*% t(X_centered)   # n × n
+
+# ── Mardia skewness ────────────────────────────────────────────────────────────
+b1p       <- mean(D_mat^3)
+stat_skew <- n_obs * b1p / 6
+df_skew   <- p_dim * (p_dim + 1) * (p_dim + 2) / 6
+p_skew    <- 1 - pchisq(stat_skew, df = df_skew)
+
+# ── Mardia kurtosis ────────────────────────────────────────────────────────────
+mahal_diag <- diag(D_mat)
+b2p        <- mean(mahal_diag^2)
+stat_kurt  <- (b2p - p_dim * (p_dim + 2)) / sqrt(8 * p_dim * (p_dim + 2) / n_obs)
+p_kurt     <- 2 * (1 - pnorm(abs(stat_kurt)))
+
+cat("=== Mardia's Multivariate Normality Test ===\n")
+cat(sprintf("  Skewness  b1p=%.4f  stat=%.4f  df=%.0f  p=%.6f  %s\n",
+            b1p, stat_skew, df_skew, p_skew,
+            if (p_skew < 0.05) "NON-NORMAL" else "normal"))
+cat(sprintf("  Kurtosis  b2p=%.4f  stat=%.4f          p=%.6f  %s\n",
+            b2p, stat_kurt, p_kurt,
+            if (p_kurt < 0.05) "NON-NORMAL" else "normal"))
+```
+
+---
+
+## 6. PERMANOVA
+
+```{r permanova, eval=FALSE}
+# NOTE: This chunk is set to eval=FALSE because adonis2 on n=4130 rows takes
+# ~20 min for 999 permutations.  Run permanova.R separately instead.
+# FIX: The Python notebook ran three separate one-way PERMANOVAs (one for
+# origin, one for side, and one for a combined origin_side factor) instead of
+# a true 2-way design.  Here we use a proper 2-way PERMANOVA with
+# vegan::adonis2(Y ~ origin * side, by="terms").
+set.seed(42)
+Y_perm    <- as.matrix(df_complete[VEIN_COLS])
+perm_full <- vegan::adonis2(
+  Y_perm ~ origin * side,
+  data         = df_complete,
+  method       = "euclidean",
+  permutations = 999,
+  by           = "terms"
+)
+cat("=== 2-way PERMANOVA (euclidean distance, 999 permutations) ===\n")
+print(perm_full)
+```
+
+---
+
+## 7. Linear Discriminant Analysis + LOO-CV
+
+```{r lda-fit}
+# ── 7a. Origin discrimination (right wing only) ───────────────────────────────
+df_right_c <- df_complete %>% filter(side == "right")
+X_right    <- as.matrix(df_right_c[VEIN_COLS])
+y_origin   <- df_right_c$origin
+
+# LOO cross-validation via MASS::lda(CV=TRUE)
+lda_loo_origin <- MASS::lda(x = X_right, grouping = y_origin, CV = TRUE)
+acc_origin     <- mean(lda_loo_origin$class == y_origin)
+cm_origin      <- table(Actual = y_origin, Predicted = lda_loo_origin$class)
+
+cat("=== LDA — Origin discrimination (right wing, LOO-CV) ===\n")
+cat(sprintf("Accuracy: %.1f%%\n", acc_origin * 100))
+print(cm_origin)
+
+# Full LDA for LD1 projection scores
+lda_full_origin <- MASS::lda(x = X_right, grouping = y_origin)
+ld1_origin      <- as.numeric(predict(lda_full_origin, X_right)$x[, 1])
+# Align LD1 sign to sklearn convention: Chile has negative mean LD1.
+# MASS::lda and sklearn use different SVD sign conventions — classification
+# accuracy and the shape of density curves are identical; only axis direction flips.
+if (mean(ld1_origin[y_origin == "Chile"]) > 0) {
+  ld1_origin              <- -ld1_origin
+  lda_full_origin$scaling <- -lda_full_origin$scaling
+}
+
+# ── 7b. Side discrimination within each origin ────────────────────────────────
+results_lda <- list()
+for (orig in c("Chile", "Ribeirao_Preto")) {
+  d_orig    <- df_complete %>% filter(as.character(origin) == orig)
+  X_orig    <- as.matrix(d_orig[VEIN_COLS])
+  y_side    <- d_orig$side
+
+  lda_loo_s  <- MASS::lda(x = X_orig, grouping = y_side, CV = TRUE)
+  acc_s      <- mean(lda_loo_s$class == y_side)
+  cm_s       <- table(Actual = y_side, Predicted = lda_loo_s$class)
+
+  results_lda[[orig]] <- list(acc = acc_s, cm = cm_s,
+                              data = d_orig, X = X_orig, y = y_side)
+
+  cat(sprintf("\n=== LDA — Side within %s (LOO-CV) ===\n",
+              ORIGIN_LABELS[orig]))
+  cat(sprintf("Accuracy: %.1f%%\n", acc_s * 100))
+  print(cm_s)
+}
+```
+
+```{r lda-plot, fig.width=18, fig.height=5}
+# ── LD1 density plots — 3 panels ──────────────────────────────────────────────
+df_ld1_orig <- data.frame(
+  LD1          = ld1_origin,
+  origin_label = ORIGIN_LABELS[as.character(y_origin)]
+)
+p_lda1 <- ggplot(df_ld1_orig, aes(x = LD1, fill = origin_label)) +
+  geom_density(alpha = 0.35, linewidth = 0.6) +
+  scale_fill_manual(
+    values = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B"),
+    name   = "Origin"
+  ) +
+  labs(x = "LD1 Score", y = "Density",
+       title = sprintf("Coyhaique vs RPR (acc: %.1f%%)", acc_origin * 100))
+
+lda_side_panels <- lapply(c("Chile", "Ribeirao_Preto"), function(orig) {
+  lda_full_s <- MASS::lda(x = results_lda[[orig]]$X,
+                           grouping = results_lda[[orig]]$y)
+  ld1_s      <- as.numeric(predict(lda_full_s, results_lda[[orig]]$X)$x[, 1])
+  # Align sign: "left" side has negative mean LD1 (matches sklearn convention).
+  if (mean(ld1_s[results_lda[[orig]]$y == "left"]) > 0) ld1_s <- -ld1_s
+  acc_s      <- results_lda[[orig]]$acc
+
+  df_s <- data.frame(LD1 = ld1_s, side = as.character(results_lda[[orig]]$y))
+  ggplot(df_s, aes(x = LD1, fill = side)) +
+    geom_density(alpha = 0.35, linewidth = 0.6) +
+    scale_fill_manual(values = SIDE_PAL, name = "Side") +
+    labs(x = "LD1 Score", y = "Density",
+         title = sprintf("Side within %s (acc: %.1f%%)",
+                         ORIGIN_LABELS[orig], acc_s * 100))
+})
+
+p_lda_all <- p_lda1 + lda_side_panels[[1]] + lda_side_panels[[2]] +
+  plot_annotation(
+    title = "Linear Discriminant Analysis",
+    theme = theme(plot.title = element_text(size = 16, face = "bold"))
+  )
+
+print(p_lda_all)
+ggsave("plot_lda.jpg", p_lda_all,
+       width = 18, height = 5, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_lda.jpg\n")
+```
+
+---
+
+## 8. Linear Mixed-Effects Models
+
+```{r lme}
+# Random intercept per pair_id, REML=TRUE  (matches statsmodels mixedlm)
+# P-values use Wald-z approximation (z = estimate / std_err) to match
+# statsmodels' normal-approximation p-values.  lmerTest's Satterthwaite
+# df-based p-values would differ; we deliberately use Wald-z for consistency.
+lme_results_list <- lapply(VEIN_COLS, function(trait) {
+  fmla <- as.formula(paste(trait, "~ origin * side + (1 | pair_id)"))
+  fit  <- lme4::lmer(fmla, data = df_complete, REML = TRUE)
+
+  cf      <- summary(fit)$coefficients      # Estimate, Std. Error, t value
+  ests    <- cf[, "Estimate"]
+  ses     <- cf[, "Std. Error"]
+  z_vals  <- ests / ses
+  p_vals  <- 2 * pnorm(-abs(z_vals))
+
+  data.frame(
+    trait    = trait,
+    term     = rownames(cf),
+    estimate = ests,
+    std_err  = ses,
+    z        = z_vals,
+    p_value  = p_vals,
+    AIC      = AIC(fit),
+    BIC      = BIC(fit),
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
+})
+
+lme_results <- do.call(rbind, lme_results_list)
+rownames(lme_results) <- NULL
+
+print(lme_results)
+write.csv(lme_results, "results_lme.csv", row.names = FALSE)
+cat("Saved: results_lme.csv\n")
+```
+
+---
+
+## 9. Robust PCA + Outlier Diagnostics
+
+```{r robust-pca-fit}
+set.seed(42)
+X_vein_r <- as.matrix(df_complete[VEIN_COLS])
+X_rs     <- scale_pop(X_vein_r)              # population SD → matches sklearn
+
+# Minimum Covariance Determinant  (rrcov::CovMcd ≈ sklearn MinCovDet)
+# NOTE: rrcov uses a different internal algorithm than sklearn; results are
+# qualitatively equivalent but not bitwise identical.
+mcd_fit     <- rrcov::CovMcd(X_rs)
+robust_cov  <- getCov(mcd_fit)
+robust_mean <- getCenter(mcd_fit)
+
+# Eigendecomposition (descending order)
+eig         <- eigen(robust_cov)
+eigvals     <- eig$values
+eigvecs     <- eig$vectors
+var_exp_rob <- eigvals / sum(eigvals) * 100
+
+# Robust PCA scores
+X_centered_r  <- sweep(X_rs, 2, robust_mean, "-")
+robust_scores <- X_centered_r %*% eigvecs
+
+# Mahalanobis distances and chi-sq cutoff
+mahal_rob  <- mahalanobis(X_rs, center = robust_mean, cov = robust_cov)
+cutoff_rob <- qchisq(0.975, df = 5)
+n_outliers <- sum(mahal_rob > cutoff_rob)
+
+cat(sprintf("Robust PCA variance explained: RPC1=%.1f%%, RPC2=%.1f%%\n",
+            var_exp_rob[1], var_exp_rob[2]))
+cat(sprintf("Chi-sq(df=5) cutoff (97.5%%): %.2f\n", cutoff_rob))
+cat(sprintf("Number of outliers: %d\n", n_outliers))
+```
+
+```{r robust-pca-plot, fig.width=18, fig.height=5.5}
+# ── Panel 1: Robust PCA by origin ─────────────────────────────────────────────
+rpc_df <- data.frame(
+  RPC1         = robust_scores[, 1],
+  RPC2         = robust_scores[, 2],
+  origin_label = ORIGIN_LABELS[as.character(df_complete$origin)]
+)
+p_rpc1 <- ggplot(rpc_df, aes(x = RPC1, y = RPC2, colour = origin_label)) +
+  geom_point(alpha = 0.3, size = 0.9) +
+  stat_ellipse(type = "norm", level = 0.95,
+               linetype = "dashed", linewidth = 1.5) +
+  scale_colour_manual(
+    values = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B"),
+    name   = "Origin"
+  ) +
+  labs(
+    x     = sprintf("RPC1 (%.1f%%)", var_exp_rob[1]),
+    y     = sprintf("RPC2 (%.1f%%)", var_exp_rob[2]),
+    title = "Robust PCA — by Origin"
+  )
+
+# ── Panel 2: Mahalanobis distances (sorted) ───────────────────────────────────
+mahal_sorted <- sort(mahal_rob)
+p_rpc2 <- ggplot(
+  data.frame(idx = seq_along(mahal_sorted), dist = mahal_sorted),
+  aes(x = idx, y = dist)
+) +
+  geom_point(colour = "#4393C3", alpha = 0.4, size = 0.5) +
+  geom_hline(yintercept = cutoff_rob,
+             colour = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text",
+           x     = length(mahal_sorted) * 0.05,
+           y     = cutoff_rob * 1.06,
+           label = sprintf("Cutoff = %.1f", cutoff_rob),
+           colour = "red", hjust = 0, size = 3.5) +
+  labs(
+    x     = "Sample (sorted)",
+    y     = "Mahalanobis Distance",
+    title = sprintf("Outlier Detection (%d outliers)", n_outliers)
+  )
+
+# ── Panel 3: Q-Q vs chi-sq(df=5) ─────────────────────────────────────────────
+n_samp  <- length(mahal_sorted)
+probs   <- seq(0.001, 0.999, length.out = n_samp)
+theor_q <- sort(qchisq(probs, df = 5))
+lims_qq <- range(c(theor_q, mahal_sorted))
+
+p_rpc3 <- ggplot(
+  data.frame(theoretical = theor_q, observed = mahal_sorted),
+  aes(x = theoretical, y = observed)
+) +
+  geom_point(colour = "#4393C3", alpha = 0.3, size = 0.5) +
+  geom_abline(slope = 1, intercept = 0,
+              colour = "red", linetype = "dashed", linewidth = 1.2) +
+  coord_cartesian(xlim = lims_qq, ylim = lims_qq) +
+  labs(
+    x     = expression(paste(chi^2, " (df=5) quantiles")),
+    y     = "Observed Mahalanobis Distance",
+    title = "Q-Q Plot — Multivariate Normality"
+  )
+
+# ── Combine and save ──────────────────────────────────────────────────────────
+p_robust_all <- p_rpc1 + p_rpc2 + p_rpc3 +
+  plot_annotation(
+    title = "Robust PCA & Outlier Diagnostics",
+    theme = theme(plot.title = element_text(size = 16, face = "bold"))
+  )
+
+print(p_robust_all)
+ggsave("plot_robust_pca.jpg", p_robust_all,
+       width = 18, height = 5.5, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_robust_pca.jpg\n")
+```
+
+---
+
+## 10. Asymmetry Tests (Paired t-test + Wilcoxon)
+
+```{r asymmetry-tests}
+# FIX: Python code truncated right/left arrays to equal length by row position
+# (not bee ID).  Here we do an inner join on `amost` within each colony so the
+# paired tests operate on the same bee's right and left measurements.
+asymm_results_list <- lapply(VEIN_COLS, function(trait) {
+  lapply(sort(unique(df_complete$colony_label)), function(cl) {
+    d_col   <- df_complete %>% filter(colony_label == cl)
+    d_right <- d_col %>% filter(side == "right") %>%
+               select(amost, val_r = !!sym(trait))
+    d_left  <- d_col %>% filter(side == "left")  %>%
+               select(amost, val_l = !!sym(trait))
+
+    # Inner join by bee ID
+    d_paired <- inner_join(d_right, d_left, by = "amost") %>%
+                drop_na(val_r, val_l)
+
+    n_pairs <- nrow(d_paired)
+    if (n_pairs < 3) return(NULL)
+
+    t_res  <- t.test(d_paired$val_r, d_paired$val_l, paired = TRUE)
+    w_res  <- tryCatch(
+      wilcox.test(d_paired$val_r, d_paired$val_l,
+                  paired = TRUE, exact = FALSE),
+      error = function(e) list(statistic = NA_real_, p.value = NA_real_)
+    )
+
+    origin_val <- if (startsWith(cl, "CH")) "Chile" else "Ribeirao_Preto"
+
+    data.frame(
+      colony        = cl,
+      origin        = origin_val,
+      trait         = trait,
+      mean_diff_RL  = mean(d_paired$val_r - d_paired$val_l),
+      n_pairs       = n_pairs,
+      t_stat        = as.numeric(t_res$statistic),
+      t_pvalue      = t_res$p.value,
+      # wilcox_stat is V = W+ (sum of positive ranks); Python returns W = min(W+,W-)
+      wilcox_stat   = as.numeric(w_res$statistic),
+      wilcox_pvalue = w_res$p.value,
+      stringsAsFactors = FALSE
+    )
+  })
+})
+
+# Flatten nested list, drop NULLs
+asymm_results <- do.call(rbind,
+  Filter(Negate(is.null), unlist(asymm_results_list, recursive = FALSE))
+)
+rownames(asymm_results) <- NULL
+
+asymm_results <- asymm_results %>%
+  mutate(
+    colony = str_replace(colony, "^CH", "COY") %>% str_replace("^RP", "RPR"),
+    origin = case_when(
+      origin == "Chile" ~ "Coyhaique",
+      origin == "Ribeirao_Preto" ~ "Ribeirão Preto",
+      TRUE ~ origin
+    )
+  )
+
+# Multiple-comparison adjustments
+#  - Bonferroni  (matches statsmodels multipletests method='bonferroni')
+#  - Holm-Bonferroni (sequential, uniformly more powerful than Bonferroni)
+#  - Benjamini-Hochberg (BH) — controls the false discovery rate
+ADJ_METHODS <- c(bonf = "bonferroni", holm = "holm", bh = "BH")
+
+t_p_fill <- replace(asymm_results$t_pvalue, is.na(asymm_results$t_pvalue), 1)
+for (suffix in names(ADJ_METHODS)) {
+  asymm_results[[paste0("t_pvalue_", suffix)]] <-
+    p.adjust(t_p_fill, method = ADJ_METHODS[[suffix]])
+}
+
+valid_w <- !is.na(asymm_results$wilcox_pvalue)
+for (suffix in names(ADJ_METHODS)) {
+  col <- paste0("wilcox_pvalue_", suffix)
+  asymm_results[[col]] <- NA_real_
+  asymm_results[[col]][valid_w] <- p.adjust(
+    asymm_results$wilcox_pvalue[valid_w], method = ADJ_METHODS[[suffix]]
+  )
+}
+
+print(asymm_results)
+write.csv(asymm_results, "results_table_S3_wilcoxon.csv", row.names = FALSE)
+cat("Saved: results_table_S3_wilcoxon.csv\n")
+```
+
+---
+
+## 11. Asymmetry Heatmap
+
+```{r asymmetry-heatmap, fig.width=10, fig.height=8}
+# Add significance labels
+asymm_long <- asymm_results %>%
+  mutate(trait = VEIN_LABELS[trait],
+         sig = case_when(
+    wilcox_pvalue < 0.001 ~ "***",
+    wilcox_pvalue < 0.01  ~ "**",
+    wilcox_pvalue < 0.05  ~ "*",
+    TRUE                  ~ ""
+  ))
+
+# Order colonies: first alphabetically at the top (y-axis reversed)
+colony_order <- sort(unique(asymm_long$colony))
+asymm_long   <- asymm_long %>%
+  mutate(colony = factor(colony, levels = rev(colony_order)))
+
+p_heatmap <- ggplot(asymm_long, aes(x = trait, y = colony, fill = mean_diff_RL)) +
+  geom_tile(colour = "white", linewidth = 0.5) +
+  geom_text(
+    aes(label = paste0(
+          sprintf("%.4f", mean_diff_RL),
+          ifelse(sig != "", paste0("\n", sig), "")
+        )),
+    size = 2.5, lineheight = 0.85
+  ) +
+  scale_fill_gradient2(
+    low      = "#053061",        # RdBu_r low
+    mid      = "white",
+    high     = "#67001F",        # RdBu_r high
+    midpoint = 0,
+    name     = "Mean Difference\n(Right − Left)"
+  ) +
+  labs(
+    x = "Trait",
+    y = "Colony",
+    title = paste0(
+      "Wing Asymmetry (Right \u2212 Left) by Colony and Trait\n",
+      "* p<0.05  ** p<0.01  *** p<0.001 (Wilcoxon)"
+    )
+  ) +
+  theme(plot.title = element_text(size = 11))
+
+print(p_heatmap)
+ggsave("plot_asymmetry_heatmap.jpg", p_heatmap,
+       width = 10, height = 8, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_asymmetry_heatmap.jpg\n")
+```
+
+### 11b. Asymmetry heatmaps with multiple-comparison correction
+
+Same diverging RdBu colour scheme as the heatmap above (fill encodes the mean
+Right\u2212Left difference).  Each cell shows the mean(R\u2212L) on the first
+line and that method's **adjusted Wilcoxon p-value** on the second line, so
+the impact of each correction is visible cell-by-cell.  Stars reflect the
+adjusted p-value.
+
+```{r asymmetry-heatmap-corrections, fig.width=20, fig.height=8}
+sig_stars <- function(p) case_when(
+  is.na(p)   ~ "",
+  p < 0.001  ~ "***",
+  p < 0.01   ~ "**",
+  p < 0.05   ~ "*",
+  TRUE       ~ ""
+)
+
+# Compact adjusted-p formatting: 3-decimal when 0.001 \u2264 p < 1,
+# scientific when p < 0.001, "1" when clamped, blank when NA.
+fmt_pval <- function(p) {
+  ifelse(is.na(p), "",
+  ifelse(p >= 1,             "1",
+  ifelse(p < 0.001,          formatC(p, format = "e", digits = 1),
+                              formatC(p, format = "f", digits = 3))))
+}
+
+methods_pval <- list(
+  Raw                        = "wilcox_pvalue",
+  Bonferroni                 = "wilcox_pvalue_bonf",
+  `Holm-Bonferroni`          = "wilcox_pvalue_holm",
+  `Benjamini-Hochberg (BH)`  = "wilcox_pvalue_bh"
+)
+
+asymm_long_corr <- bind_rows(lapply(names(methods_pval), function(m) {
+  asymm_results %>%
+    transmute(
+      colony,
+      trait        = VEIN_LABELS[trait],
+      mean_diff_RL,
+      pval   = .data[[methods_pval[[m]]]],
+      method = m
+    )
+})) %>%
+  mutate(
+    sig        = sig_stars(pval),
+    pval_label = fmt_pval(pval),
+    method     = factor(method, levels = names(methods_pval)),
+    colony     = factor(colony, levels = rev(sort(unique(colony))))
+  )
+
+p_heatmap_corr <- ggplot(asymm_long_corr,
+                         aes(x = trait, y = colony, fill = mean_diff_RL)) +
+  geom_tile(colour = "white", linewidth = 0.4) +
+  geom_text(
+    aes(label = paste0(
+          sprintf("%.4f", mean_diff_RL),
+          "\np=", pval_label,
+          ifelse(sig != "", paste0(" ", sig), "")
+        )),
+    size = 2.0, lineheight = 0.85
+  ) +
+  scale_fill_gradient2(
+    low      = "#053061",
+    mid      = "white",
+    high     = "#67001F",
+    midpoint = 0,
+    name     = "Mean Difference\n(Right \u2212 Left)"
+  ) +
+  facet_wrap(~ method, nrow = 1) +
+  labs(
+    x     = "Trait",
+    y     = "Colony",
+    title = paste0(
+      "Wing Asymmetry by Colony \u00D7 Trait under each correction\n",
+      "Cell text: mean(R\u2212L) and adjusted Wilcoxon p-value; ",
+      "* p<0.05  ** p<0.01  *** p<0.001"
+    )
+  ) +
+  theme(plot.title = element_text(size = 11),
+        strip.text = element_text(face = "bold"))
+
+print(p_heatmap_corr)
+ggsave("plot_asymmetry_heatmap_corrections.jpg", p_heatmap_corr,
+       width = 20, height = 8, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_asymmetry_heatmap_corrections.jpg\n")
+
+# Per-method single-panel heatmaps.
+for (m in names(methods_pval)) {
+  p_one <- ggplot(filter(asymm_long_corr, method == m),
+                  aes(x = trait, y = colony, fill = mean_diff_RL)) +
+    geom_tile(colour = "white", linewidth = 0.5) +
+    geom_text(
+      aes(label = paste0(
+            sprintf("%.4f", mean_diff_RL),
+            "\np=", pval_label,
+            ifelse(sig != "", paste0(" ", sig), "")
+          )),
+      size = 2.3, lineheight = 0.85
+    ) +
+    scale_fill_gradient2(
+      low      = "#053061",
+      mid      = "white",
+      high     = "#67001F",
+      midpoint = 0,
+      name     = "Mean Difference\n(Right \u2212 Left)"
+    ) +
+    labs(
+      x = "Trait", y = "Colony",
+      title = sprintf(paste0(
+        "Wing Asymmetry \u2014 %s correction\n",
+        "Cell text: mean(R\u2212L) and adjusted Wilcoxon p-value;  ",
+        "* p<0.05  ** p<0.01  *** p<0.001"), m)
+    ) +
+    theme(plot.title = element_text(size = 11))
+
+  fname <- paste0("plot_asymmetry_heatmap_",
+                  tolower(gsub("[^A-Za-z0-9]+", "_", m)),
+                  ".jpg")
+  ggsave(fname, p_one, width = 10, height = 8,
+         dpi = 300, device = "jpeg", bg = "white")
+}
+cat("Saved 4 per-method heatmaps (Raw / Bonferroni / Holm / BH).\n")
+```
+
+### 11c. Adjusted p-value comparison plot
+
+```{r asymmetry-pvalue-comparison, fig.width=18, fig.height=10}
+# For each (colony, trait), compare the four p-values after each adjustment.
+pval_long <- asymm_results %>%
+  mutate(trait = VEIN_LABELS[trait]) %>%
+  select(colony, trait,
+         Raw                       = wilcox_pvalue,
+         Bonferroni                = wilcox_pvalue_bonf,
+         `Holm-Bonferroni`          = wilcox_pvalue_holm,
+         `Benjamini-Hochberg (BH)`  = wilcox_pvalue_bh) %>%
+  pivot_longer(c(-colony, -trait),
+               names_to = "method", values_to = "pval") %>%
+  mutate(
+    method     = factor(method,
+                        levels = c("Raw", "Bonferroni",
+                                   "Holm-Bonferroni",
+                                   "Benjamini-Hochberg (BH)")),
+    neg_log10p = -log10(pmax(pval, 1e-10)),
+    sig005     = !is.na(pval) & pval < 0.05,
+    label      = paste0(colony, " | ", trait)
+  )
+
+p_pcompare <- ggplot(pval_long,
+                     aes(x = reorder(label, neg_log10p),
+                         y = neg_log10p,
+                         fill = sig005)) +
+  geom_col(width = 0.8) +
+  geom_hline(yintercept = -log10(0.05),
+             colour = "red", linetype = "dashed", linewidth = 0.6) +
+  scale_fill_manual(
+    values = c(`TRUE` = "#B2182B", `FALSE` = "#9E9E9E"),
+    labels = c(`TRUE` = "p < 0.05", `FALSE` = "n.s."),
+    name   = NULL
+  ) +
+  facet_wrap(~ method, ncol = 2) +
+  coord_flip() +
+  labs(
+    x     = "Colony \u00D7 Trait",
+    y     = expression(-log[10](p[adj])),
+    title = "Wilcoxon asymmetry tests \u2014 effect of multiple-comparison correction"
+  ) +
+  theme(axis.text.y = element_text(size = 5.5),
+        strip.text  = element_text(face = "bold"),
+        plot.title  = element_text(size = 13))
+
+print(p_pcompare)
+ggsave("plot_asymmetry_pvalue_comparison.jpg", p_pcompare,
+       width = 18, height = 10, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_asymmetry_pvalue_comparison.jpg\n")
+
+# Count of significant tests per method (illustrative summary).
+sig_summary <- pval_long %>%
+  group_by(method) %>%
+  summarise(
+    n_total       = sum(!is.na(pval)),
+    n_significant = sum(sig005, na.rm = TRUE),
+    .groups = "drop"
+  )
+cat("\nSignificant tests (p<0.05) per correction method:\n")
+print(sig_summary)
+```
+
+---
+
+## 12. Hierarchical Clustering
+
+```{r clustermap, fig.width=10, fig.height=9}
+# Colony means — right wing only  (matches Python sns.clustermap cell)
+colony_means_df <- df_complete %>%
+  filter(side == "right") %>%
+  group_by(colony_label, origin, pair_id) %>%
+  summarise(across(all_of(VEIN_COLS), mean), .groups = "drop") %>%
+  mutate(
+    colony_label = str_replace(colony_label, "^CH", "COY") %>% str_replace("^RP", "RPR"),
+    origin = case_when(
+      origin == "Chile" ~ "Coyhaique",
+      origin == "Ribeirao_Preto" ~ "Ribeirão Preto",
+      TRUE ~ origin
+    )
+  )
+
+cm_mat    <- as.matrix(colony_means_df[VEIN_COLS])
+cm_scaled <- scale_pop(cm_mat)
+rownames(cm_scaled) <- colony_means_df$colony_label
+colnames(cm_scaled) <- VEIN_LABELS[colnames(cm_scaled)]
+
+# Annotation for row colors (origin)
+ann_row <- data.frame(
+  Origin    = as.character(colony_means_df$origin),
+  row.names = colony_means_df$colony_label
+)
+ann_colors <- list(
+  Origin = c("Coyhaique" = "#2166AC", "Ribeirão Preto" = "#B2182B")
+)
+
+# RdBu_r palette (100 levels, matches matplotlib/seaborn cmap='RdBu_r')
+rdbu_r <- colorRampPalette(rev(brewer.pal(11, "RdBu")))(100)
+
+# Draw clustermap silently and then save via jpeg device
+p_cluster <- pheatmap(
+  cm_scaled,
+  cluster_rows             = TRUE,
+  cluster_cols             = TRUE,
+  clustering_method        = "ward.D2",    # scipy "ward" == R "ward.D2"
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  annotation_row           = ann_row,
+  annotation_colors        = ann_colors,
+  color                    = rdbu_r,
+  display_numbers          = TRUE,
+  number_format            = "%.2f",
+  number_color             = "black",
+  fontsize_number          = 8,
+  border_color             = "white",
+  main = "Hierarchical Clustering \u2014 Colony Mean Vein Measurements (Right Wing)",
+  fontsize                 = 12,
+  silent                   = TRUE
+)
+
+# Display inline
+grid::grid.newpage()
+grid::grid.draw(p_cluster$gtable)
+
+# Save to JPEG
+jpeg("plot_cluster_heatmap.jpg", width = 10, height = 9,
+     units = "in", res = 300, quality = 95)
+grid::grid.newpage()
+grid::grid.draw(p_cluster$gtable)
+dev.off()
+cat("Saved: plot_cluster_heatmap.jpg\n")
+```
+
+### 12b. Hierarchical Clustering — Mahalanobis distance
+
+Mahalanobis distance accounts for the correlation structure between traits and
+their differing variances, so two colonies that differ along a low-variance or
+de-correlated direction count as more distant than the same Euclidean step.
+Pairwise Mahalanobis distances between colony means are computed using the
+inverse pooled within-colony covariance estimated from bee-level right-wing
+measurements.
+
+```{r clustermap-mahalanobis, fig.width=10, fig.height=9}
+# Pooled within-colony covariance from bee-level right-wing data
+df_right_for_cov <- df_complete %>% filter(side == "right")
+within_cov <- df_right_for_cov %>%
+  group_by(colony_label) %>%
+  summarise(
+    cov_mat = list(cov(across(all_of(VEIN_COLS)))),
+    n       = n(),
+    .groups = "drop"
+  )
+# Weighted by (n - 1)
+weights      <- within_cov$n - 1
+S_pooled     <- Reduce("+", Map(function(C, w) C * w,
+                                within_cov$cov_mat, weights)) / sum(weights)
+S_pooled_inv <- solve(S_pooled)
+
+# Mahalanobis distance matrix between colony means (using ORIGINAL,
+# unscaled means — Mahalanobis is scale-invariant via S_pooled_inv).
+cm_raw_mat <- as.matrix(colony_means_df[VEIN_COLS])
+rownames(cm_raw_mat) <- colony_means_df$colony_label
+
+n_col   <- nrow(cm_raw_mat)
+mahal_d <- matrix(0, n_col, n_col,
+                  dimnames = list(rownames(cm_raw_mat), rownames(cm_raw_mat)))
+for (i in seq_len(n_col - 1)) {
+  for (j in seq(i + 1, n_col)) {
+    diff_ij      <- cm_raw_mat[i, ] - cm_raw_mat[j, ]
+    mahal_d[i,j] <- sqrt(as.numeric(diff_ij %*% S_pooled_inv %*% diff_ij))
+    mahal_d[j,i] <- mahal_d[i,j]
+  }
+}
+mahal_dist <- as.dist(mahal_d)
+
+# Trait-side distance: a sensible analogue is correlation distance
+# (1 - |cor|), independent of the row-side metric.
+trait_dist <- as.dist(1 - abs(cor(cm_scaled)))
+
+p_cluster_mahal <- pheatmap(
+  cm_scaled,
+  cluster_rows             = hclust(mahal_dist,  method = "ward.D2"),
+  cluster_cols             = hclust(trait_dist,  method = "ward.D2"),
+  annotation_row           = ann_row,
+  annotation_colors        = ann_colors,
+  color                    = rdbu_r,
+  display_numbers          = TRUE,
+  number_format            = "%.2f",
+  number_color             = "black",
+  fontsize_number          = 8,
+  border_color             = "white",
+  main = paste0(
+    "Hierarchical Clustering \u2014 Mahalanobis distance (rows), ",
+    "Ward linkage\n",
+    "Colony Mean Vein Measurements (Right Wing)"
+  ),
+  fontsize                 = 12,
+  silent                   = TRUE
+)
+
+grid::grid.newpage()
+grid::grid.draw(p_cluster_mahal$gtable)
+
+jpeg("plot_cluster_heatmap_mahalanobis.jpg",
+     width = 10, height = 9, units = "in", res = 300, quality = 95)
+grid::grid.newpage()
+grid::grid.draw(p_cluster_mahal$gtable)
+dev.off()
+cat("Saved: plot_cluster_heatmap_mahalanobis.jpg\n")
+
+# Print pairwise Mahalanobis distances for reference.
+cat("\nPairwise Mahalanobis distances between colony means:\n")
+print(round(mahal_d, 2))
+```
+
+---
+
+## 13. Reaction Norms
+
+```{r reaction-norms, fig.width=20, fig.height=5}
+rn_data <- df_complete %>%
+  filter(side == "right") %>%
+  group_by(pair_id, origin) %>%
+  summarise(across(all_of(VEIN_COLS), mean), .groups = "drop")
+
+rn_long <- rn_data %>%
+  pivot_longer(all_of(VEIN_COLS), names_to = "trait", values_to = "mean_value") %>%
+  mutate(origin_label = ORIGIN_LABELS[as.character(origin)],
+         trait        = VEIN_LABELS[trait])
+
+pair_ids_sorted <- sort(unique(rn_long$pair_id))
+pair_colors_rn  <- setNames(PAIR_PAL[seq_along(pair_ids_sorted)], pair_ids_sorted)
+
+# 5 panels — one per trait
+panels_rn <- lapply(seq_along(VEIN_COLS), function(idx) {
+  tr       <- VEIN_COLS[idx]
+  tr_label <- VEIN_LABELS[tr]
+  d_tr <- rn_long %>%
+    filter(trait == tr_label) %>%
+    arrange(pair_id, origin)       # Chile is level 1 → left x-axis position
+
+  p <- ggplot(d_tr, aes(x = origin_label, y = mean_value,
+                         group = pair_id, colour = pair_id)) +
+    geom_line(linewidth = 1.5) +
+    geom_point(size = 3) +
+    scale_colour_manual(values = pair_colors_rn, name = "Colony Pair") +
+    scale_x_discrete(limits = c("Coyhaique", "Ribeirão Preto")) +
+    labs(
+      x     = "Origin",
+      y     = if (idx == 1) "Mean measurement (mm)" else NULL,
+      title = tr_label
+    ) +
+    theme(axis.text.x = element_text(angle = 15, hjust = 1))
+
+  if (idx > 1) p <- p + theme(legend.position = "none")
+  p
+})
+
+p_rn <- wrap_plots(panels_rn, ncol = 5) +
+  plot_annotation(
+    title   = "Reaction Norms \u2014 Colony Pair Means Across Environments (Right Wing)",
+    theme   = theme(plot.title = element_text(size = 15, face = "bold"))
+  )
+
+print(p_rn)
+ggsave("plot_reaction_norms.jpg", p_rn,
+       width = 20, height = 5, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_reaction_norms.jpg\n")
+```
+
+---
+
+## 14. G×E Interactions
+
+### 14a. Pearson and Spearman correlations
+
+```{r gxe-correlations}
+# Wide format: one row per pair_id, one column per trait × origin combination
+rn_wide <- rn_data %>%
+  pivot_wider(
+    id_cols     = pair_id,
+    names_from  = origin,
+    values_from = all_of(VEIN_COLS),
+    names_glue  = "{.value}__{origin}"
+  )
+
+corr_results <- do.call(rbind, lapply(VEIN_COLS, function(tr) {
+  ch_vals <- rn_wide[[paste0(tr, "__Chile")]]
+  rp_vals <- rn_wide[[paste0(tr, "__Ribeirao_Preto")]]
+
+  r_pear  <- cor.test(ch_vals, rp_vals, method = "pearson")
+  r_spear <- cor.test(ch_vals, rp_vals, method = "spearman", exact = FALSE)
+
+  data.frame(
+    trait        = tr,
+    pearson_r    = as.numeric(r_pear$estimate),
+    pearson_p    = r_pear$p.value,
+    spearman_rho = as.numeric(r_spear$estimate),
+    spearman_p   = r_spear$p.value,
+    stringsAsFactors = FALSE
+  )
+}))
+
+cat("=== G\u00D7E Correlations (Coyhaique vs Ribeirão Preto colony means) ===\n")
+print(corr_results)
+```
+
+### 14b. G×E scatter plots
+
+```{r gxe-scatter, fig.width=20, fig.height=4}
+panels_gxe <- lapply(seq_along(VEIN_COLS), function(i) {
+  tr       <- VEIN_COLS[i]
+  tr_label <- VEIN_LABELS[tr]
+  ch_vals <- rn_wide[[paste0(tr, "__Chile")]]
+  rp_vals <- rn_wide[[paste0(tr, "__Ribeirao_Preto")]]
+  pids    <- rn_wide$pair_id
+  r_pear  <- corr_results$pearson_r[i]
+  p_pear  <- corr_results$pearson_p[i]
+
+  lims <- range(c(ch_vals, rp_vals)) * c(0.98, 1.02)
+  fit_coef <- coef(lm(rp_vals ~ ch_vals))
+  x_fit    <- seq(lims[1], lims[2], length.out = 50)
+  fit_line <- data.frame(x = x_fit,
+                          y = fit_coef[1] + fit_coef[2] * x_fit)
+
+  d_gxe <- data.frame(Chile = ch_vals, RP = rp_vals, pair_id = pids)
+
+  ggplot(d_gxe, aes(x = Chile, y = RP)) +
+    geom_point(fill = "#4393C3", colour = "#2166AC",
+               shape = 21, size = 3) +
+    geom_text_repel(aes(label = pair_id), size = 2.5, max.overlaps = 20) +
+    geom_abline(slope = 1, intercept = 0,
+                linetype = "dashed", alpha = 0.3, linewidth = 0.8) +
+    geom_line(data = fit_line, aes(x = x, y = y),
+              colour = "#B2182B", linewidth = 1.2, inherit.aes = FALSE) +
+    coord_cartesian(xlim = lims, ylim = lims) +
+    labs(
+      x     = "Coyhaique mean (mm)",
+      y     = if (i == 1) "RPR mean (mm)" else NULL,
+      title = sprintf("%s\nr=%.2f, p=%.3f", tr_label, r_pear, p_pear)
+    ) +
+    theme(plot.title = element_text(size = 10, face = "bold"))
+})
+
+p_gxe <- wrap_plots(panels_gxe, ncol = 5) +
+  plot_annotation(
+    title = "G\u00D7E Interaction \u2014 Coyhaique vs Ribeirão Preto Colony Means",
+    theme = theme(plot.title = element_text(size = 14, face = "bold"))
+  )
+
+print(p_gxe)
+ggsave("plot_gxe_scatter.jpg", p_gxe,
+       width = 20, height = 4, dpi = 300, device = "jpeg", bg = "white")
+cat("Saved: plot_gxe_scatter.jpg\n")
+```
+
+---
+
+*R translation of `analysis_main.ipynb`.*
+*Two deliberate corrections from the Python version (tagged `# FIX:` in the code):*
+*1. **PERMANOVA** uses a proper 2-way `adonis2(Y ~ origin*side)` instead of three separate one-way tests on a combined factor.*
+*2. **Asymmetry tests** pair bee measurements by `amost` (bee ID) via inner join, instead of positional truncation.*

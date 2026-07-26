@@ -1,0 +1,13 @@
+analysis,actual,predicted,n,accuracy
+origin (right wing),Chile,Chile,864,0.7204301075268817
+origin (right wing),Chile,Ribeirao_Preto,251,0.7204301075268817
+origin (right wing),Ribeirao_Preto,Chile,321,0.7204301075268817
+origin (right wing),Ribeirao_Preto,Ribeirao_Preto,610,0.7204301075268817
+side within Coyhaique,right,right,688,0.6232078853046595
+side within Coyhaique,right,left,427,0.6232078853046595
+side within Coyhaique,left,right,414,0.6232078853046595
+side within Coyhaique,left,left,703,0.6232078853046595
+side within Ribeirão Preto,right,right,728,0.8019271948608137
+side within Ribeirão Preto,right,left,203,0.8019271948608137
+side within Ribeirão Preto,left,right,167,0.8019271948608137
+side within Ribeirão Preto,left,left,770,0.8019271948608137
