@@ -95,7 +95,7 @@ bees 999 times to build the null distribution.
 
 The equivalent R code (`vegan::adonis2`) takes about twenty minutes on this
 dataset; this version takes under a second and gives the same numbers — see
-`docs/CONVERGENCE.md`."""),
+`docs/CONVERGENCE.pdf`."""),
 
     ("code", "wm.run_permanova(df_complete, n_permutations=999, seed=42, outdir=OUT)"),
 

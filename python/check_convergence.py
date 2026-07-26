@@ -5,7 +5,7 @@ Check that the Python results reproduce the published R results.
 Run `python run_all.py` first, then:
 
     python check_convergence.py                 # print the report
-    python check_convergence.py --write-docs    # also write docs/CONVERGENCE.md
+    python check_convergence.py --write-docs    # also typeset docs/CONVERGENCE.pdf
 
 Every numeric column that exists in both the Python output (`results/`) and the
 archived R output (`reference_R_output/`) is compared row by row.  For each
@@ -122,12 +122,12 @@ def build_report(results_dir: Path, reference_dir: Path) -> Report:
                   "origin[T.Ribeirao_Preto]:side[T.left]":
                       "originRibeirao_Preto:sideleft"}
         py = py.assign(term=py["term"].replace(rename))
-        rep.compare("Mixed models — estimates", py, r, ["trait", "term"],
+        rep.compare("Mixed models: estimates", py, r, ["trait", "term"],
                     ["estimate"], tol=1e-5,
                     note="lme4 and statsmodels use different REML optimisers")
-        rep.compare("Mixed models — AIC/BIC", py, r, ["trait", "term"],
+        rep.compare("Mixed models: AIC/BIC", py, r, ["trait", "term"],
                     ["AIC", "BIC"], tol=1e-6)
-        rep.compare("Mixed models — SE / z / p", py, r, ["trait", "term"],
+        rep.compare("Mixed models: SE / z / p", py, r, ["trait", "term"],
                     ["std_err", "z"], tol=1e-3,
                     note="lme4 and statsmodels use different REML optimisers")
 
@@ -174,7 +174,7 @@ R_PRINTED = {
         "nerv03": (0.6141514, 0.0336243336, 0.6083916, 0.0358059971),
         "nerv04": (0.5071451, 0.0923965479, 0.3636364, 0.2452650007),
         "nerv05": (0.8491714, 0.0004745179, 0.8251748, 0.0009513629)},
-    "Asymmetry — significant tests at p<0.05": {
+    "Asymmetry: significant tests at p<0.05": {
         "Raw": 101, "Bonferroni": 76, "Holm-Bonferroni": 81,
         "Benjamini-Hochberg (BH)": 100},
     "Robust PCA": {"RPC1": 54.6, "RPC2": 21.1, "n_outliers": 122},
@@ -239,7 +239,7 @@ def _compare_printed_values(rep: Report, results_dir: Path) -> None:
             r_counts += R_PRINTED["LDA confusion counts"][k]
         n, ad, rd = diff(py_counts, r_counts)
         rep.add("LDA (leave-one-out)", "confusion matrix counts", n, ad, rd, 0.0,
-                "every one of ~2,200 bees classified identically")
+                "every one of about 2,200 bees classified identically")
 
     gxe = _load(results_dir / "results_gxe_correlations.csv")
     if gxe is not None:
@@ -255,10 +255,10 @@ def _compare_printed_values(rep: Report, results_dir: Path) -> None:
 
     summ = _load(results_dir / "results_asymmetry_correction_summary.csv")
     if summ is not None:
-        keys = list(R_PRINTED["Asymmetry — significant tests at p<0.05"])
+        keys = list(R_PRINTED["Asymmetry: significant tests at p<0.05"])
         s = summ.set_index("method")["n_significant"]
         n, ad, rd = diff([s[k] for k in keys],
-                         [R_PRINTED["Asymmetry — significant tests at p<0.05"][k]
+                         [R_PRINTED["Asymmetry: significant tests at p<0.05"][k]
                           for k in keys])
         rep.add("Multiple-comparison corrections", "number of significant tests",
                 n, ad, rd, 0.0)
@@ -270,9 +270,230 @@ def _compare_printed_values(rep: Report, results_dir: Path) -> None:
         rep.add_manual(
             "Robust PCA (MCD)", "variance explained (%)", "APPROX",
             f"Python RPC1={v[0]:.1f}%, RPC2={v[1]:.1f}% vs R "
-            f"RPC1={ref['RPC1']}%, RPC2={ref['RPC2']}% — sklearn's MinCovDet and "
-            "rrcov::CovMcd draw different random subsets; agreement to ~0.1 "
-            "percentage points is the expected behaviour, not an error")
+            f"RPC1={ref['RPC1']}%, RPC2={ref['RPC2']}%. sklearn's MinCovDet and "
+            "rrcov::CovMcd draw different random subsets; agreement to about "
+            "0.1 percentage points is the expected behaviour, not an error")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Typeset report: LaTeX source -> PDF
+# ═════════════════════════════════════════════════════════════════════════════
+
+#: Characters that appear in the report but are not directly typeable in a
+#: pdfLaTeX source file, mapped to their LaTeX equivalents.
+_TEX_UNICODE = {
+    "—": ", ", "–": "--", "×": r"$\times$",
+    "≈": r"$\approx$", "≤": r"$\leq$", "≥": r"$\geq$",
+    "²": r"$^2$", "η": r"$\eta$", "ã": r"\~{a}",
+    "ç": r"\c{c}", "í": r"\'{\i}", "é": r"\'{e}",
+}
+
+
+def tex_escape(text) -> str:
+    """Make an arbitrary Python string safe to drop into a LaTeX document."""
+    if text is None or (isinstance(text, float) and pd.isna(text)):
+        return ""
+    out = str(text)
+    for char, replacement in _TEX_UNICODE.items():
+        out = out.replace(char, replacement)
+    for char in "\\&%$#_{}":
+        out = out.replace(char, "\\" + char)
+    out = out.replace("~", r"\textasciitilde{}")
+    out = out.replace("^", r"\textasciicircum{}")
+    out = out.replace("<", r"\textless{}").replace(">", r"\textgreater{}")
+    return out
+
+
+def _tex_number(value: str) -> str:
+    """Render `1.234e-14` as proper maths so exponents typeset correctly."""
+    if not value:
+        return ""
+    if "e" in value:
+        mantissa, exponent = value.split("e")
+        return f"${mantissa}\\times 10^{{{int(exponent)}}}$"
+    return f"${value}$"
+
+
+VERDICT_COLOUR = {"PASS": "passgreen", "APPROX": "approxorange",
+                  "FAIL": "failred"}
+
+
+def build_tex(show: pd.DataFrame, notes: pd.DataFrame,
+              table: pd.DataFrame) -> str:
+    """Return the complete LaTeX source of the convergence report."""
+    n_pass = int((table.verdict == "PASS").sum())
+    n_approx = int((table.verdict == "APPROX").sum())
+    n_fail = int((table.verdict == "FAIL").sum())
+
+    body_rows = []
+    for _, row in show.iterrows():
+        colour = VERDICT_COLOUR.get(row["verdict"], "black")
+        body_rows.append(" & ".join([
+            tex_escape(row["analysis"]),
+            r"\texttt{" + tex_escape(row["quantity"]) + "}",
+            tex_escape(row["n_values"]),
+            _tex_number(row["max_abs_diff"]),
+            _tex_number(row["max_rel_diff"]),
+            _tex_number(row["tolerance"]),
+            rf"\textcolor{{{colour}}}{{\textbf{{{row['verdict']}}}}}",
+        ]) + r" \\")
+
+    note_items = [
+        rf"\item \textbf{{{tex_escape(row['analysis'])} / "
+        rf"\texttt{{{tex_escape(row['quantity'])}}}}}: {tex_escape(row['note'])}"
+        for _, row in notes.drop_duplicates(subset=["note"]).iterrows()
+    ]
+
+    preamble = r"""\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+
+\hypersetup{pdftitle={Python versus R convergence report},
+            pdfauthor={Gruber CV, Polido M, Souto HG, Soares AEE, Araneda Duran X, Del Lama MA},
+            pdfsubject={Thermal stress and honeybee wing morphology}}
+
+\definecolor{passgreen}{HTML}{1B7837}
+\definecolor{approxorange}{HTML}{B35806}
+\definecolor{failred}{HTML}{B2182B}
+
+\title{Python versus R convergence report}
+\author{Thermal stress and honeybee wing morphology\\
+\small Gruber CV, Polido M, Souto HG, Soares AEE, Araneda Duran X, Del Lama MA (2026)}
+\date{Generated automatically by \texttt{python check\_convergence.py -{}-write-docs}}
+
+\begin{document}
+\maketitle
+"""
+
+    intro = r"""
+\section*{What this report is}
+
+The R pipeline (\texttt{R/analysis\_main.Rmd}) produced the results reported in
+the paper. The Python pipeline (\texttt{python/run\_all.py}) is an independent
+reimplementation written to verify them. This report is generated by rerunning
+both and comparing every quantity the R pipeline reports against the Python
+recomputation, value by value.
+
+For each comparison the table gives the number of values compared, the largest
+absolute difference, the largest relative difference (the absolute difference
+divided by the R value), and the tolerance the comparison is judged against. A
+row passes when the largest relative difference stays below its tolerance.
+Tolerances are set far tighter than any decimal place reported in the paper,
+because the two languages should be performing identical arithmetic; the two
+places where that expectation is deliberately relaxed are explained in the
+notes.
+
+\section*{Comparisons}
+"""
+
+    table_env = (
+        r"""
+\begingroup
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{longtable}{@{}p{4.4cm}p{3.2cm}r r r r l@{}}
+\toprule
+\textbf{Analysis} & \textbf{Quantity} & \textbf{$n$} &
+\textbf{Max abs.\ diff.} & \textbf{Max rel.\ diff.} &
+\textbf{Tolerance} & \textbf{Verdict} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Analysis} & \textbf{Quantity} & \textbf{$n$} &
+\textbf{Max abs.\ diff.} & \textbf{Max rel.\ diff.} &
+\textbf{Tolerance} & \textbf{Verdict} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+"""
+        + "\n".join(body_rows)
+        + r"""
+\end{longtable}
+\endgroup
+"""
+    )
+
+    notes_section = (
+        "\n\\section*{Notes}\n\n\\begin{enumerate}\n"
+        + "\n".join(note_items)
+        + "\n\\end{enumerate}\n"
+    )
+
+    verdict_word = ("complete agreement" if n_fail == 0
+                    else "one or more disagreements")
+    summary = rf"""
+\section*{{Summary}}
+
+\textbf{{\textcolor{{passgreen}}{{{n_pass} PASS}}}},
+\textbf{{\textcolor{{approxorange}}{{{n_approx} APPROX}}}},
+\textbf{{\textcolor{{failred}}{{{n_fail} FAIL}}}}.
+
+The two implementations are therefore in {verdict_word} on every quantity that
+enters the paper. The single \textsc{{approx}} row is the robust PCA, where
+\texttt{{sklearn.covariance.MinCovDet}} and \texttt{{rrcov::CovMcd}} both
+implement the Minimum Covariance Determinant estimator but draw different
+random subsets internally, so exact numerical agreement is not attainable in
+principle and the comparison is made qualitatively instead.
+
+\end{{document}}
+"""
+    return preamble + intro + table_env + notes_section + summary
+
+
+def write_pdf_report(show: pd.DataFrame, notes: pd.DataFrame,
+                     table: pd.DataFrame, outdir: Path = None) -> Path | None:
+    """
+    Typeset the convergence report and leave only `docs/CONVERGENCE.pdf` behind.
+
+    The LaTeX source and all of pdfLaTeX's auxiliary files are written to a
+    temporary directory, so the repository keeps just the finished PDF.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    outdir = Path(outdir) if outdir else DOCS_DIR
+    outdir.mkdir(parents=True, exist_ok=True)
+    pdf_path = outdir / "CONVERGENCE.pdf"
+
+    engine = shutil.which("pdflatex")
+    if engine is None:
+        tex_fallback = outdir / "CONVERGENCE.tex"
+        tex_fallback.write_text(build_tex(show, notes, table), encoding="utf-8")
+        print(f"\npdflatex not found: wrote LaTeX source to {tex_fallback} "
+              "instead. Install a TeX distribution (TeX Live, MacTeX or "
+              "MiKTeX) to get the PDF.", file=sys.stderr)
+        return None
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        tex_file = tmp / "CONVERGENCE.tex"
+        tex_file.write_text(build_tex(show, notes, table), encoding="utf-8")
+        # Twice, so longtable settles its column widths and page breaks.
+        for _ in range(2):
+            proc = subprocess.run(
+                [engine, "-interaction=nonstopmode", "-halt-on-error",
+                 tex_file.name],
+                cwd=tmp, capture_output=True, text=True)
+        if proc.returncode != 0:
+            log = (tmp / "CONVERGENCE.log")
+            tail = log.read_text(errors="replace")[-2000:] if log.exists() \
+                else proc.stdout[-2000:]
+            print("\npdflatex failed:\n" + tail, file=sys.stderr)
+            return None
+        shutil.copyfile(tmp / "CONVERGENCE.pdf", pdf_path)
+
+    print(f"\nWrote {pdf_path}")
+    return pdf_path
 
 
 def main(argv=None) -> int:
@@ -281,7 +502,7 @@ def main(argv=None) -> int:
     ap.add_argument("--results", default=str(wm.RESULTS_DIR))
     ap.add_argument("--reference", default=str(REFERENCE_DIR))
     ap.add_argument("--write-docs", action="store_true",
-                    help="write docs/CONVERGENCE.md as well as printing")
+                    help="typeset docs/CONVERGENCE.pdf as well as printing")
     args = ap.parse_args(argv)
 
     results_dir, reference_dir = Path(args.results), Path(args.reference)
@@ -321,22 +542,7 @@ def main(argv=None) -> int:
           f"{n_fail} FAIL")
 
     if args.write_docs:
-        DOCS_DIR.mkdir(exist_ok=True)
-        path = DOCS_DIR / "CONVERGENCE.md"
-        with path.open("w") as fh:
-            fh.write("# Python vs R convergence report\n\n")
-            fh.write("Generated by `python check_convergence.py --write-docs`.\n\n")
-            fh.write("Every quantity the R pipeline reports is recomputed in "
-                     "Python and compared here.  `max_rel_diff` is the largest "
-                     "relative difference across all the values in that row.\n\n")
-            fh.write(show.drop(columns=["note"]).to_markdown(index=False))
-            fh.write("\n\n## Notes\n\n")
-            for _, row in notes.drop_duplicates(subset=["note"]).iterrows():
-                fh.write(f"* **{row['analysis']} / {row['quantity']}** — "
-                         f"{row['note']}\n")
-            fh.write(f"\n\n**Summary: {int((table.verdict == 'PASS').sum())} PASS, "
-                     f"{n_approx} APPROX, {n_fail} FAIL.**\n")
-        print(f"\nWrote {path}")
+        write_pdf_report(show, notes, table)
 
     return 1 if n_fail else 0
 

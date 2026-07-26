@@ -5,7 +5,7 @@ the repository so the outputs can be inspected without running anything; re-runn
 the pipeline simply overwrites it.
 
 The published R equivalents live in [`../reference_R_output/`](../reference_R_output),
-and [`../docs/CONVERGENCE.md`](../docs/CONVERGENCE.md) compares the two number by
+and [`../docs/CONVERGENCE.pdf`](../docs/CONVERGENCE.pdf) compares the two number by
 number.
 
 ## Tables

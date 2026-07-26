@@ -54,7 +54,7 @@ The dataset is **4,100 wings** from **2,065 bees** across **24 colonies**
 ├── R/                       the original R analysis
 ├── results/                 output of the Python pipeline (tables + figures)
 ├── reference_R_output/      output of the R pipeline, as published
-└── docs/CONVERGENCE.md      proof that the two agree, number by number
+└── docs/CONVERGENCE.pdf     proof that the two agree, number by number
 ```
 
 The **R pipeline produced the published results**. The **Python pipeline is an
@@ -105,7 +105,11 @@ That takes about a minute and writes every table and figure into `results/`.
 python check_convergence.py
 ```
 
-This prints a PASS/FAIL table comparing all 38 sets of numbers.
+This prints a PASS/FAIL table comparing all 38 sets of numbers. The comparison
+is already typeset in [`docs/CONVERGENCE.pdf`](docs/CONVERGENCE.pdf); if you
+want to regenerate that PDF, add `--write-docs`. That step is the only one in
+the repository that needs LaTeX installed (TeX Live, MacTeX or MiKTeX) — the
+comparison itself prints to the screen without it.
 
 ### Option B — Python, step by step in a notebook
 
@@ -173,9 +177,10 @@ exactly which findings survive. `plot_asymmetry_pvalue_comparison.jpg` shows all
 ## Do the two agree?
 
 Yes. `python check_convergence.py` compares every quantity the R pipeline
-reports against the Python recomputation and writes
-[`docs/CONVERGENCE.md`](docs/CONVERGENCE.md). The current status is
-**37 PASS, 1 APPROX, 0 FAIL**. Highlights:
+reports against the Python recomputation and prints a PASS/FAIL table. The
+typeset version of that table is
+[`docs/CONVERGENCE.pdf`](docs/CONVERGENCE.pdf) — open it for the full
+comparison. The current status is **37 PASS, 1 APPROX, 0 FAIL**. Highlights:
 
 | Quantity | Agreement |
 |---|---|

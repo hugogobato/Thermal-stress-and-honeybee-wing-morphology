@@ -28,7 +28,7 @@ It writes `permanova_log.txt` and `results_permanova.csv`.
 
 The Python implementation in `../python/wing_morphometry.py` computes the same
 quantities algebraically in under a second and agrees with this script to ten
-significant digits — see [`../docs/CONVERGENCE.md`](../docs/CONVERGENCE.md).
+significant digits — see [`../docs/CONVERGENCE.pdf`](../docs/CONVERGENCE.pdf).
 
 ## Packages used
 
