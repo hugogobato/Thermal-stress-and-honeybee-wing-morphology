@@ -9,16 +9,16 @@ Data and complete analysis code for:
 > <sup>¥</sup> shared first authors
 >
 > <sup>1</sup> Departamento de Genética e Evolução, Universidade Federal de São Carlos, São Carlos, Brazil
-> <sup>2</sup> Dell, Austin — TX, USA
+> <sup>2</sup> Instituto de Ciências Matemáticas e de Computação (ICMC), Universidade de São Paulo, São Carlos, Brazil
 > <sup>3</sup> Departamento de Genética, Faculdade de Medicina de Ribeirão Preto, Universidade de São Paulo, Brazil
 > <sup>4</sup> *(affiliation to be completed)*
 
 | Author | ORCID |
 |---|---|
-| Caroline Vivian Gruber | — |
+| Caroline Vivian Gruber | [0009-0004-8760-9886](https://orcid.org/0009-0004-8760-9886)|
 | Mariah Polido | [0000-0001-9965-5127](https://orcid.org/0000-0001-9965-5127) |
 | Hugo Gobato Souto | [0000-0002-7039-0572](https://orcid.org/0000-0002-7039-0572) |
-| Ademilson Espencer E. Soares | — |
+| Ademilson Espencer E. Soares | [0000-0003-0180-0635](https://orcid.org/0000-0003-0180-0635) |
 | Ximena Araneda Duran | [0000-0002-7876-6909](https://orcid.org/0000-0002-7876-6909) |
 | Marco Antonio Del Lama | [0000-0002-3329-8953](https://orcid.org/0000-0002-3329-8953) |
 
